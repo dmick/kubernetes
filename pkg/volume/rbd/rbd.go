@@ -20,6 +20,10 @@ import (
 	"fmt"
 	dstrings "strings"
 
+	"github.com/miekg/dns"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -252,6 +256,32 @@ type rbdVolumeProvisioner struct {
 	options volume.VolumeOptions
 }
 
+func lookuphost(hostname string, serverip string) (iplist []string) {
+	ips := make([]string, 0, 5)
+	m := new(dns.Msg)
+	m.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
+	in, err := dns.Exchange(m, serverip+":53")
+
+	if err != nil {
+		glog.Errorf("dns lookup of %v failed: err %v", hostname, err)
+		return
+	} else {
+		for _, a := range in.Answer {
+			if t, ok := a.(*dns.A); ok {
+				if len(ips) >= cap(ips) {
+					// expand slice if necessary
+					newips := make([]string, cap(ips), cap(ips)*2)
+					copy(newips, ips)
+					ips = newips
+				}
+				ips = append(ips, t.A.String())
+			}
+		}
+	}
+	iplist = ips
+	return
+}
+
 func (r *rbdVolumeProvisioner) Provision() (*v1.PersistentVolume, error) {
 	if r.options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
@@ -265,9 +295,34 @@ func (r *rbdVolumeProvisioner) Provision() (*v1.PersistentVolume, error) {
 	for k, v := range r.options.Parameters {
 		switch dstrings.ToLower(k) {
 		case "monitors":
+			// find DNS server address through client API
+			// *rbdVolumeProvisioner [rbdMounter] [rbd] rbdPlugin volume.Volumehost GetKubeClient()
+			dnsip := ""
+			kubeclient := r.plugin.host.GetKubeClient()
+			core := kubeclient.CoreV1()
+			dnssvc, err := core.Services(metav1.NamespaceSystem).Get("kube-dns", metav1.GetOptions{})
+
+			if err != nil {
+				glog.Infof("error getting kube-dns service: %v\n", err)
+			}
+
+			if len(dnssvc.Spec.ClusterIP) == 0 {
+				glog.Infof("kube-dns service ClusterIP bad")
+			}
+			dnsip = dnssvc.Spec.ClusterIP
+
 			arr := dstrings.Split(v, ",")
 			for _, m := range arr {
-				r.Mon = append(r.Mon, m)
+				if dnsip != "" {
+					if lookup := lookuphost(m, dnsip); len(lookup) != 0 {
+						for _, a := range lookup {
+							glog.Infof("adding %+v from mon lookup", a)
+							r.Mon = append(r.Mon, a)
+						}
+					}
+				} else {
+					r.Mon = append(r.Mon, m)
+				}
 			}
 		case "adminid":
 			r.adminId = v
