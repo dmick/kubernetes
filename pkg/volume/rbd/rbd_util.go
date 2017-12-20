@@ -126,6 +126,7 @@ func (util *RBDUtil) rbdLock(b rbdMounter, lock bool) error {
 	lock_id := kubeLockMagic + node.GetHostname("")
 
 	l := len(b.Mon)
+	glog.Infof("rbdLock: len b.Mon: %v\n", l)
 	// avoid mount storm, pick a host randomly
 	start := rand.Int() % l
 	// iterate all hosts until mount succeeds.
@@ -137,6 +138,7 @@ func (util *RBDUtil) rbdLock(b rbdMounter, lock bool) error {
 		// for defencing, get the locker name, something like "client.1234"
 		cmd, err = b.plugin.execCommand("rbd",
 			append([]string{"lock", "list", b.Image, "--pool", b.Pool, "--id", b.Id, "-m", mon}, secret_opt...))
+		glog.Infof("rbdLock calling %v\n", cmd)
 		output = string(cmd)
 		glog.Infof("lock list output %q", output)
 		if err != nil {
@@ -229,6 +231,7 @@ func (util *RBDUtil) fencing(b rbdMounter) error {
 	if (&b).GetAttributes().ReadOnly {
 		return nil
 	}
+	glog.Infof("fencing calling rbdLock\n")
 	return util.rbdLock(b, true)
 }
 
@@ -249,6 +252,7 @@ func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	globalPDPath := b.manager.MakeGlobalPDName(*b.rbd)
 	notMnt, err := b.mounter.IsLikelyNotMountPoint(globalPDPath)
 	// in the first time, the path shouldn't exist and IsLikelyNotMountPoint is expected to get NotExist
+	glog.Infof("RBDUtil.AttachDisk(%v) mons: %v\n", b, b.Mon)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("rbd: %s failed to check mountpoint", globalPDPath)
 	}

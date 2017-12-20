@@ -292,11 +292,12 @@ func (r *rbdVolumeProvisioner) Provision() (*v1.PersistentVolume, error) {
 	secretName := ""
 	secret := ""
 
+	glog.Infof("rbdVolumeProvisioner.Provision params %v\n", r.options.Parameters)
 	for k, v := range r.options.Parameters {
 		switch dstrings.ToLower(k) {
 		case "monitors":
+			glog.Infof("rbdVolumeProvisioner.Provision monitors %v\n", v)
 			// find DNS server address through client API
-			// *rbdVolumeProvisioner [rbdMounter] [rbd] rbdPlugin volume.Volumehost GetKubeClient()
 			dnsip := ""
 			kubeclient := r.plugin.host.GetKubeClient()
 			core := kubeclient.CoreV1()
@@ -304,26 +305,33 @@ func (r *rbdVolumeProvisioner) Provision() (*v1.PersistentVolume, error) {
 
 			if err != nil {
 				glog.Infof("error getting kube-dns service: %v\n", err)
+			} else {
+				glog.Infof("kube-dns service found\n")
 			}
 
 			if len(dnssvc.Spec.ClusterIP) == 0 {
 				glog.Infof("kube-dns service ClusterIP bad")
 			}
 			dnsip = dnssvc.Spec.ClusterIP
+			glog.Infof("dnsip: %v\n", dnsip)
 
 			arr := dstrings.Split(v, ",")
 			for _, m := range arr {
 				if dnsip != "" {
+					glog.Infof("looking up %v\n", m)
 					if lookup := lookuphost(m, dnsip); len(lookup) != 0 {
 						for _, a := range lookup {
 							glog.Infof("adding %+v from mon lookup", a)
 							r.Mon = append(r.Mon, a)
 						}
+					} else {
+						glog.Infof("lookup failed\n")
 					}
 				} else {
 					r.Mon = append(r.Mon, m)
 				}
 			}
+			glog.Infof("resultant r.Mon: %v\n", r.Mon)
 		case "adminid":
 			r.adminId = v
 		case "adminsecretname":
